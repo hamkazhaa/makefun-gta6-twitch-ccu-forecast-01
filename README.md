@@ -39,7 +39,10 @@ case's own comparables at run time — there are no hard-coded curves.
    and a tiny one does not explode.
 4. **Honest spread.** Per hour, the standard deviation of the kept
    launches' residuals around (shape x their own G), smoothed over
-   neighbouring hours and scaled by 0.9. Quantiles are the log-normal
+   neighbouring hours and scaled by 0.85 (chosen on the practice
+   spread curve: 0.85 keeps 90% coverage at 0.89 while scoring
+   better than 0.90; 0.80 scores a touch lower but lets coverage
+   slip to 0.87). Quantiles are the log-normal
    quantiles p * exp(shape_h * G + z_tau * sd_h).
 
 Deterministic: no wall clock, no randomness, no network — the output
@@ -55,15 +58,15 @@ hour-1 values match the case files exactly).
 
 | case | game | loss | house baseline | 90% coverage |
 |------|------|------|---------------|--------------|
-| p00 | Wolverine | **0.2271** | 0.7436 | 0.87 |
-| p01 | Red Dead Redemption 2 | **0.1262** | 0.2868 | 1.00 |
-| p02 | God of War Ragnarok | **0.1711** | 0.2146 | 0.96 |
-| p03 | Spider-Man 2 | **0.2513** | 0.3033 | 0.83 |
-| **mean** | | **0.1939** | **0.3871** | **0.91** |
+| p00 | Wolverine | **0.2274** | 0.7436 | 0.83 |
+| p01 | Red Dead Redemption 2 | **0.1223** | 0.2868 | 1.00 |
+| p02 | God of War Ragnarok | **0.1696** | 0.2146 | 0.91 |
+| p03 | Spider-Man 2 | **0.2521** | 0.3033 | 0.83 |
+| **mean** | | **0.1928** | **0.3871** | **0.89** |
 
 The model beats the house baseline (~0.387) on every practice case —
-about **2x better overall** — while keeping 90% coverage near 0.9,
-so the bands are honest, not degenerate. The two executions of each
+about **2x better overall** — while keeping 90% coverage at 0.89,
+essentially on target, so the bands are honest, not degenerate. The two executions of each
 practice case are byte-identical.
 
 ## What did not work (checked and dropped)

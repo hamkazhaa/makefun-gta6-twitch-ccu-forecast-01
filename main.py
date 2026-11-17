@@ -27,9 +27,13 @@ Model (learned fresh from the case's own comparables at run time):
      rises a little and a tiny one does not explode.
   4. The quantile spread is honest: per hour, the standard deviation
      of the kept launches' residuals around (shape * their own G),
-     smoothed over neighbouring hours and scaled by 0.9 (the factor
-     that minimised practice pinball loss while keeping 90% coverage
-     near 0.9). Quantiles are the log-normal quantiles
+     smoothed over neighbouring hours and scaled by 0.85. That value
+     sits on a smooth spread curve measured on the practice cases
+     (0.80: loss 0.1923, coverage 0.87; 0.85: 0.1928, 0.89; 0.90:
+     0.1939, 0.91; 0.95: 0.1952, 0.92): 0.85 is the narrowest factor
+     that still keeps 90% coverage essentially on target, while 0.80
+     scores a touch lower only by letting coverage slip to 0.87.
+     Quantiles are the log-normal quantiles
      p * exp(shape_h * G + z_tau * sd_h).
 
 No wall clock, no randomness, no network: the output is a pure
@@ -46,7 +50,7 @@ from datetime import datetime, timedelta
 LEVELS = [0.05, 0.25, 0.5, 0.75, 0.95]
 Z = [-1.6448536269514722, -0.6744897501960817, 0.0,
      0.6744897501960817, 1.6448536269514722]
-SPREAD = 0.9
+SPREAD = 0.85
 G_FLOOR = 0.3
 G_CAP = 2.2
 MAX_VIEWERS = 1_000_000_000.0
