@@ -34,8 +34,9 @@ case's own comparables at run time — there are no hard-coded curves.
    here: with only ~11 kept launches the median throws away most of
    the evidence, and the similarity weights already down-weight the
    odd ones out (leave-one-case-out: mean shape 0.1760 vs median
-   0.1801 at fixed knobs; the advantage holds at every (lambda,
-   SPREAD) tested and under per-fold tuning, 0.1821 vs 0.1927). The
+   0.1801 at fixed knobs; with the current spread model the mean
+   shape scores 0.1729 fixed / 0.1798 tuned, against 0.1760 / 0.1821
+   for the same shape with a flat 0.85 spread). The
    day's curve is NOT flat: it dips to ~0.7x in hours 3–4 (Europe
    asleep, US not yet unlocked), jumps at hours 5–6 (US East
    midnight) and 9 (US West midnight), and peaks in the US evening
@@ -49,10 +50,16 @@ case's own comparables at run time — there are no hard-coded curves.
    and a tiny one does not explode.
 4. **Honest spread.** Per hour, the standard deviation of the kept
    launches' residuals around (shape x their own G), smoothed over
-   neighbouring hours and scaled by 0.85 (chosen on the practice
-   spread curve: 0.85 keeps 90% coverage at 0.89 while scoring
-   better than 0.90; 0.80 scores a touch lower but lets coverage
-   slip to 0.87). Quantiles are the log-normal
+   neighbouring hours and scaled by 0.80, with a gentle per-hour
+   ramp: the residual spread is wider in the early hours (night dip,
+   unlock timing) and tighter late in the day, so the spread is
+   multiplied by (1 − 0.2 * (hour − 13) / 11): 0.96x at hour 2,
+   0.80x at hour 13, 0.64x at hour 24. Validated leave-one-case-out,
+   this spread model scores 0.1729 against 0.1760 for a flat 0.85
+   spread, with 90% coverage at 0.90; each half was validated
+   separately (flat 0.80: 0.1744; the ramp alone on a 0.85 base:
+   0.1740) and the advantage of both holds at lambda 0.15 and 0.35.
+   Quantiles are the log-normal
    quantiles p * exp(shape_h * G + z_tau * sd_h).
 5. **Small per-hour centre correction.** The comparable mean shape
    systematically over-predicts midday (hours 11–15) and
@@ -79,29 +86,29 @@ hour-1 values match the case files exactly).
 
 | case | game | loss | house baseline | 90% coverage |
 |------|------|------|---------------|--------------|
-| p00 | Wolverine | **0.1952** | 0.7436 | 0.91 |
-| p01 | Red Dead Redemption 2 | **0.1135** | 0.2868 | 1.00 |
-| p02 | God of War Ragnarok | **0.1418** | 0.2146 | 1.00 |
-| p03 | Spider-Man 2 | **0.2194** | 0.3033 | 0.83 |
-| **mean** | | **0.1675** | **0.3871** | **0.94** |
+| p00 | Wolverine | **0.1950** | 0.7436 | 0.83 |
+| p01 | Red Dead Redemption 2 | **0.1087** | 0.2868 | 1.00 |
+| p02 | God of War Ragnarok | **0.1365** | 0.2146 | 1.00 |
+| p03 | Spider-Man 2 | **0.2156** | 0.3033 | 0.83 |
+| **mean** | | **0.1640** | **0.3871** | **0.91** |
 
 The model beats the house baseline (~0.387) on every practice case —
-about **2.3x better overall** — while keeping 90% coverage at 0.94,
+about **2.4x better overall** — while keeping 90% coverage at 0.91,
 essentially on target, so the bands are honest, not degenerate. The two executions of each
 practice case are byte-identical.
 
 **Honest out-of-sample check (leave-one-case-out).** The table above
 is in-sample for the bias-correction table, so the decision to adopt
 the change was made on leave-one-case-out validation instead: tune on
-3 practice cases, test on the held-out 4th, rotate. The median-shape
-model tuned the same way scores a LOO mean of 0.1863 (0.1801 with the
-knobs fixed at their modal values λ=0.25, s=1.0); the weighted-mean
-shape scores **0.1821 tuned (0.1760 fixed)**, winning clearly on two
-of the four held-out cases and losing a little on the other two, with
-90% coverage at 0.89–0.93. The in-sample 0.1675 above is therefore
-optimistic; 0.1760–0.1821 is the honest estimate of the improvement
-(about −2% vs the median-shape model, on top of the earlier −3.6%
-from the weighting plus bias correction).
+3 practice cases, test on the held-out 4th, rotate. The weighted-mean
+shape with a flat 0.85 spread scores a LOO mean of 0.1821 tuned
+(0.1760 with the knobs fixed at λ=0.25, s=1.0); with the current
+spread model (0.80 base + per-hour ramp) it scores **0.1798 tuned
+(0.1729 fixed)**, winning on three of the four held-out cases, with
+90% coverage at 0.90. The in-sample 0.1640 above is therefore
+optimistic; 0.1729–0.1798 is the honest estimate of the improvement
+(about −1.8% vs the flat-spread model, on top of the earlier −2% from
+the mean shape and −3.6% from the weighting plus bias correction).
 
 ## What did not work (checked and dropped)
 
@@ -122,9 +129,14 @@ from the weighting plus bias correction).
   0.1928 — dropped. (The two forms are the same fit: the ratio form
   is the baseline form minus log h1, which is already a predictor.)
 - **Per-hour spread ramp** (spread multiplier rising or falling with
-  the hour): LOO mean 0.1922 vs 0.1932 baseline — a negligible gain
-  that picked edge values and let coverage slip to 0.70 on one
-  held-out case; dropped.
+  the hour): the aggressive version (round 2) scored LOO 0.1922 vs
+  0.1932 baseline — a negligible gain that picked edge values and
+  let coverage slip to 0.70 on one held-out case; dropped. The
+  GENTLE version was re-tested in round 4 and adopted: a negative
+  ramp (wider early, tighter late) on a 0.80 base scores LOO 0.1729
+  vs 0.1760 for a flat 0.85 spread, coverage 0.90. The positive ramp
+  (+0.1: 0.1772; +0.2: 0.1790, coverage 0.88) and a flat 0.90 spread
+  (0.1777) were rejected.
 - **Ensemble with the direct median-ratio forecast**: LOO tuning
   picks weight 1.0 (the current model) on every fold — no gain;
   dropped.
@@ -148,6 +160,14 @@ from the weighting plus bias correction).
   fixed / 0.1863 tuned vs 0.1760 / 0.1821 for the weighted mean —
   the median throws away most of the evidence from only ~11 kept
   launches; replaced by the mean.
+- **Blend of mean and median shape** (0.75 mean + 0.25 median:
+  LOO 0.1768; 0.5/0.5: 0.1781): worse than the pure mean; dropped.
+- **Relaxing the comparable filter** (hour-1 >= 5,000 instead of
+  10,000, adding one launch per case): LOO 0.1839 — the extra
+  smaller launch has a different shape and hurts; dropped.
+- **Second G predictor re-tested under the mean shape** (round 4):
+  ignition jump 24h 0.1841, 7d 0.1829, viewers-per-channel 0.1763
+  vs 0.1760 baseline — still no signal; dropped.
 
 ## Run
 

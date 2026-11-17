@@ -35,14 +35,17 @@ Model (learned fresh from the case's own comparables at run time):
      rises a little and a tiny one does not explode.
   4. The quantile spread is honest: per hour, the standard deviation
      of the kept launches' residuals around (shape * their own G),
-     smoothed over neighbouring hours and scaled by 0.85. That value
-     sits on a smooth spread curve measured on the practice cases
-     (0.80: loss 0.1923, coverage 0.87; 0.85: 0.1928, 0.89; 0.90:
-     0.1939, 0.91; 0.95: 0.1952, 0.92): 0.85 is the narrowest factor
-     that still keeps 90% coverage essentially on target, while 0.80
-     scores a touch lower only by letting coverage slip to 0.87.
-     Quantiles are the log-normal quantiles
-     p * exp(shape_h * G + z_tau * sd_h).
+     smoothed over neighbouring hours and scaled by 0.80, with a
+     gentle per-hour ramp: the residual spread is genuinely wider in
+     the early hours (night dip, unlock timing) and tighter late in
+     the day when the shape has settled, so the spread is multiplied
+     by (1 - 0.2 * (hour - 13) / 11): 0.96x at hour 2, 0.80x at hour
+     13, 0.64x at hour 24. Validated leave-one-case-out, this spread
+     model scores 0.1729 against 0.1760 for a flat 0.85 spread, with
+     90% coverage at 0.90; each half was validated separately (flat
+     0.80: 0.1744; the ramp alone on a 0.85 base: 0.1740) and the
+     advantage of both holds at lambda 0.15 and 0.35. Quantiles are
+     the log-normal quantiles p * exp(shape_h * G + z_tau * sd_h).
   5. A small per-hour centre correction (BIAS_DELTA, shrunk by 0.25):
      the comparable mean shape systematically over-predicts midday
      (hours 11-15) and under-predicts the morning rise (hours 5-8)
@@ -50,11 +53,11 @@ Model (learned fresh from the case's own comparables at run time):
      average of those errors, measured on the four practice launches,
      is added back at a quarter strength. Validated leave-one-case-
      out: the similarity weighting plus this correction score a LOO
-     mean pinball loss of 0.1760 at fixed knobs (0.1821 with the
-     knobs tuned per fold), against 0.1801 (fixed) / 0.1863 (tuned)
-     for the median-shape model; the mean shape wins clearly on two
-     of the four held-out cases and loses a little on the other two,
-     with 90% coverage at 0.89-0.93. The correction is a fixed table
+     mean pinball loss of 0.1729 at fixed knobs (0.1798 with the
+     knobs tuned per fold), against 0.1760 (fixed) / 0.1821 (tuned)
+     for the same model with a flat 0.85 spread; the spread model
+     wins on three of the four held-out cases, with 90% coverage at
+     0.90. The correction is a fixed table
      fitted offline on public historical data, like SPREAD; nothing
      is fitted to the case being forecast beyond its own comparables.
 
@@ -72,7 +75,12 @@ from datetime import datetime, timedelta
 LEVELS = [0.05, 0.25, 0.5, 0.75, 0.95]
 Z = [-1.6448536269514722, -0.6744897501960817, 0.0,
      0.6744897501960817, 1.6448536269514722]
-SPREAD = 0.85
+SPREAD = 0.80
+# Per-hour spread ramp: residual spread is wider in the early hours
+# (night dip, unlock timing) and tighter late in the day, so the
+# spread is multiplied by (1 - SPREAD_RAMP * (hour - 13) / 11):
+# 0.96x at hour 2, 0.80x at hour 13, 0.64x at hour 24.
+SPREAD_RAMP = 0.2
 G_FLOOR = 0.3
 G_CAP = 2.2
 MAX_VIEWERS = 1_000_000_000.0
@@ -300,7 +308,8 @@ def forecast(case):
     for hour in range(2, 25):
         centre = shape.get(hour, shape.get(24, 0.0)) * growth
         centre += BIAS_LAMBDA * BIAS_DELTA.get(hour, 0.0)
-        sd = spread.get(hour, 0.5) * SPREAD
+        sd = (spread.get(hour, 0.5) * SPREAD
+              * (1 - SPREAD_RAMP * (hour - 13) / 11.0))
         quantiles = []
         for z in Z:
             value = anchor * math.exp(centre + z * sd)
