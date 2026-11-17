@@ -12,14 +12,19 @@ Model (learned fresh from the case's own comparables at run time):
      peak launches (simultaneous global unlock, hour 1 is the peak) are
      a different shape and are left out; so is the GTA VI category's
      own pre-release history, which is a premiere, not a launch.
-  2. The typical shape is the per-hour median log-ratio across the
-     kept launches, normalised so its peak is 1, WEIGHTED by similarity
-     to this case: a comparable counts exp(-|log h1_i - log h1_case|),
-     so the shape is set mostly by launches of a similar size to this
-     one (for GTA VI's scale, the biggest launches). It dips to ~0.7x
-     in hours 3-4 (Europe asleep, US not yet unlocked), jumps at hours
-     5-6 (US East midnight) and 9 (US West midnight), and peaks in
-     the US evening around hour 20-21.
+  2. The typical shape is the per-hour WEIGHTED MEAN log-ratio
+     across the kept launches, normalised so its peak is 1, WEIGHTED
+     by similarity to this case: a comparable counts
+     exp(-|log h1_i - log h1_case|), so the shape is set mostly by
+     launches of a similar size to this one (for GTA VI's scale, the
+     biggest launches). The mean beats the median here: with only
+     ~11 kept launches the median throws away most of the evidence,
+     and the similarity weights already down-weight the odd ones out
+     (leave-one-case-out: mean shape 0.1760 vs median 0.1801 at fixed
+     knobs, and the advantage holds at every (lambda, SPREAD) tested).
+     It dips to ~0.7x in hours 3-4 (Europe asleep, US not yet
+     unlocked), jumps at hours 5-6 (US East midnight) and 9 (US West
+     midnight), and peaks in the US evening around hour 20-21.
   3. The scale of the rise depends on how much of the audience was
      already in at hour 1: across the kept launches, the peak
      log-ratio falls almost linearly with log(hour-1 viewers)
@@ -39,18 +44,19 @@ Model (learned fresh from the case's own comparables at run time):
      Quantiles are the log-normal quantiles
      p * exp(shape_h * G + z_tau * sd_h).
   5. A small per-hour centre correction (BIAS_DELTA, shrunk by 0.25):
-     the comparable median systematically over-predicts midday
+     the comparable mean shape systematically over-predicts midday
      (hours 11-15) and under-predicts the morning rise (hours 5-8)
      and the evening (hours 18-22) on every practice launch, so the
      average of those errors, measured on the four practice launches,
      is added back at a quarter strength. Validated leave-one-case-
      out: the similarity weighting plus this correction score a LOO
-     mean pinball loss of 0.1863 (0.1801 with the knobs fixed at their
-     modal values), against 0.1932 for the unweighted model tuned the
-     same way, improving on all four held-out cases with 90% coverage
-     at 0.88-0.92. The correction is a fixed table fitted offline on
-     public historical data, like SPREAD; nothing is fitted to the
-     case being forecast beyond its own comparables.
+     mean pinball loss of 0.1760 at fixed knobs (0.1821 with the
+     knobs tuned per fold), against 0.1801 (fixed) / 0.1863 (tuned)
+     for the median-shape model; the mean shape wins clearly on two
+     of the four held-out cases and loses a little on the other two,
+     with 90% coverage at 0.89-0.93. The correction is a fixed table
+     fitted offline on public historical data, like SPREAD; nothing
+     is fitted to the case being forecast beyond its own comparables.
 
 No wall clock, no randomness, no network: the output is a pure
 function of the input case, so two runs are byte-identical.
@@ -86,11 +92,11 @@ BIAS_LAMBDA = 0.25
 # under-prediction at hours 18-22), so it is a systematic shape error
 # of the comparable median, not noise from one launch.
 BIAS_DELTA = {
-    2: -0.064, 3: -0.076, 4: 0.016, 5: 0.140, 6: 0.250, 7: 0.214,
-    8: 0.133, 9: 0.004, 10: -0.134, 11: -0.312, 12: -0.399,
-    13: -0.420, 14: -0.321, 15: -0.227, 16: -0.105, 17: 0.041,
-    18: 0.123, 19: 0.156, 20: 0.126, 21: 0.129, 22: 0.104,
-    23: 0.087, 24: 0.072,
+    2: -0.037, 3: -0.057, 4: 0.049, 5: 0.128, 6: 0.198, 7: 0.097,
+    8: -0.016, 9: -0.140, 10: -0.232, 11: -0.357, 12: -0.409,
+    13: -0.402, 14: -0.296, 15: -0.192, 16: -0.070, 17: 0.074,
+    18: 0.154, 19: 0.158, 20: 0.112, 21: 0.102, 22: 0.085,
+    23: 0.071, 24: 0.053,
 }
 
 
@@ -151,17 +157,12 @@ def median(values):
     return (ordered[mid - 1] + ordered[mid]) / 2.0
 
 
-def weighted_median(pairs):
-    """Median of values with weights: the value where the cumulative
-    weight first reaches half the total."""
-    ordered = sorted(pairs)
-    total = sum(w for _, w in ordered)
-    acc = 0.0
-    for value, weight in ordered:
-        acc += weight
-        if acc >= total / 2.0:
-            return value
-    return ordered[-1][0]
+def weighted_mean(pairs):
+    """Weighted mean of (value, weight) pairs."""
+    total = sum(w for _, w in pairs)
+    if total <= 0:
+        return pairs[0][0]
+    return sum(v * w for v, w in pairs) / total
 
 
 def fit_growth(rows):
@@ -231,7 +232,7 @@ def learn(case):
         pairs = [(lr[hour], w) for (_, _, _, lr), w in zip(rows, weights)
                  if hour in lr]
         if pairs:
-            shape[hour] = weighted_median(pairs)
+            shape[hour] = weighted_mean(pairs)
     peak_shape = max(shape.values())
     if peak_shape <= 0:
         return None

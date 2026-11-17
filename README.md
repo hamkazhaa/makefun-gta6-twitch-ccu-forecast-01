@@ -25,15 +25,21 @@ case's own comparables at run time — there are no hard-coded curves.
    the peak) are a different shape and are left out; so is the GTA VI
    category's own pre-release history, which is a premiere, not a
    launch.
-2. **Typical shape.** The per-hour median log-ratio across the kept
-   launches, normalised so its peak is 1, WEIGHTED by similarity to
-   this case: a comparable counts exp(−|log h1_i − log h1_case|), so
-   the shape is set mostly by launches of a similar size to this one
-   (for GTA VI's scale, the biggest launches — effective sample about
-   5 of 11). The day's curve is NOT flat: it dips to ~0.7x in hours
-   3–4 (Europe asleep, US not yet unlocked), jumps at hours 5–6 (US
-   East midnight) and 9 (US West midnight), and peaks in the US
-   evening around hour 20–21.
+2. **Typical shape.** The per-hour WEIGHTED MEAN log-ratio across
+   the kept launches, normalised so its peak is 1, WEIGHTED by
+   similarity to this case: a comparable counts exp(−|log h1_i −
+   log h1_case|), so the shape is set mostly by launches of a
+   similar size to this one (for GTA VI's scale, the biggest launches
+   — effective sample about 5 of 11). The mean beats the median
+   here: with only ~11 kept launches the median throws away most of
+   the evidence, and the similarity weights already down-weight the
+   odd ones out (leave-one-case-out: mean shape 0.1760 vs median
+   0.1801 at fixed knobs; the advantage holds at every (lambda,
+   SPREAD) tested and under per-fold tuning, 0.1821 vs 0.1927). The
+   day's curve is NOT flat: it dips to ~0.7x in hours 3–4 (Europe
+   asleep, US not yet unlocked), jumps at hours 5–6 (US East
+   midnight) and 9 (US West midnight), and peaks in the US evening
+   around hour 20–21.
 3. **Growth depends on hour 1.** Across the kept launches, the peak
    log-ratio falls almost linearly with log(hour-1 viewers): a small
    hour 1 means most of the world still has to unlock, so the day
@@ -48,7 +54,7 @@ case's own comparables at run time — there are no hard-coded curves.
    better than 0.90; 0.80 scores a touch lower but lets coverage
    slip to 0.87). Quantiles are the log-normal
    quantiles p * exp(shape_h * G + z_tau * sd_h).
-5. **Small per-hour centre correction.** The comparable median
+5. **Small per-hour centre correction.** The comparable mean shape
    systematically over-predicts midday (hours 11–15) and
    under-predicts the morning rise (hours 5–8) and the evening
    (hours 18–22) on every practice launch, so the average of those
@@ -73,27 +79,29 @@ hour-1 values match the case files exactly).
 
 | case | game | loss | house baseline | 90% coverage |
 |------|------|------|---------------|--------------|
-| p00 | Wolverine | **0.2054** | 0.7436 | 0.87 |
-| p01 | Red Dead Redemption 2 | **0.1118** | 0.2868 | 1.00 |
-| p02 | God of War Ragnarok | **0.1333** | 0.2146 | 1.00 |
-| p03 | Spider-Man 2 | **0.2348** | 0.3033 | 0.83 |
-| **mean** | | **0.1713** | **0.3871** | **0.92** |
+| p00 | Wolverine | **0.1952** | 0.7436 | 0.91 |
+| p01 | Red Dead Redemption 2 | **0.1135** | 0.2868 | 1.00 |
+| p02 | God of War Ragnarok | **0.1418** | 0.2146 | 1.00 |
+| p03 | Spider-Man 2 | **0.2194** | 0.3033 | 0.83 |
+| **mean** | | **0.1675** | **0.3871** | **0.94** |
 
 The model beats the house baseline (~0.387) on every practice case —
-about **2.3x better overall** — while keeping 90% coverage at 0.92,
+about **2.3x better overall** — while keeping 90% coverage at 0.94,
 essentially on target, so the bands are honest, not degenerate. The two executions of each
 practice case are byte-identical.
 
 **Honest out-of-sample check (leave-one-case-out).** The table above
 is in-sample for the bias-correction table, so the decision to adopt
 the change was made on leave-one-case-out validation instead: tune on
-3 practice cases, test on the held-out 4th, rotate. The unweighted
-model tuned the same way scores a LOO mean of 0.1932; the weighted
-shape plus the bias correction scores **0.1863** (0.1801 with the
-knobs fixed at their modal values λ=0.25, s=1.0), improving on all
-four held-out cases with 90% coverage at 0.88–0.92. The in-sample
-0.1713 above is therefore optimistic; 0.1863 is the honest estimate
-of the improvement (about −3.6% vs the unweighted model).
+3 practice cases, test on the held-out 4th, rotate. The median-shape
+model tuned the same way scores a LOO mean of 0.1863 (0.1801 with the
+knobs fixed at their modal values λ=0.25, s=1.0); the weighted-mean
+shape scores **0.1821 tuned (0.1760 fixed)**, winning clearly on two
+of the four held-out cases and losing a little on the other two, with
+90% coverage at 0.89–0.93. The in-sample 0.1675 above is therefore
+optimistic; 0.1760–0.1821 is the honest estimate of the improvement
+(about −2% vs the median-shape model, on top of the earlier −3.6%
+from the weighting plus bias correction).
 
 ## What did not work (checked and dropped)
 
@@ -120,6 +128,26 @@ of the improvement (about −3.6% vs the unweighted model).
 - **Ensemble with the direct median-ratio forecast**: LOO tuning
   picks weight 1.0 (the current model) on every fold — no gain;
   dropped.
+- **Joint re-tuning of (lambda, s, SPREAD)** over a 3x3x3 grid:
+  LOO mean 0.1927, worse than the fixed knobs (0.1863 tuned
+  protocol) — with only 3 train cases the tuning picks a different
+  knob per fold; dropped.
+- **Hour-1 "ignition" jump** log(h1 / pre-launch baseline) as a 2nd
+  G predictor (24h baseline: LOO 0.1875; 7d baseline: 0.1868) —
+  no gain over the current model; dropped. (Minute-level momentum
+  inside hour 1 cannot be tested at all: practice history is hourly.)
+- **Viewers per channel at hour 1** as a 2nd G predictor (the
+  testable analog of top-stream concentration; practice `streams`
+  is null, so the literal top-stream share cannot be validated):
+  LOO 0.1804 vs 0.1801 for the same-protocol fixed-knob baseline —
+  no signal; dropped.
+- **Split similarity scale** (different weight scale for early
+  hours 2–8 vs late hours 9–24): best split 0.1798 vs 0.1801
+  baseline — noise; dropped.
+- **Weighted median shape** (the previous version): LOO 0.1801
+  fixed / 0.1863 tuned vs 0.1760 / 0.1821 for the weighted mean —
+  the median throws away most of the evidence from only ~11 kept
+  launches; replaced by the mean.
 
 ## Run
 
