@@ -13,8 +13,11 @@ Model (learned fresh from the case's own comparables at run time):
      a different shape and are left out; so is the GTA VI category's
      own pre-release history, which is a premiere, not a launch.
   2. The typical shape is the per-hour median log-ratio across the
-     kept launches, normalised so its peak is 1. It dips to ~0.7x in
-     hours 3-4 (Europe asleep, US not yet unlocked), jumps at hours
+     kept launches, normalised so its peak is 1, WEIGHTED by similarity
+     to this case: a comparable counts exp(-|log h1_i - log h1_case|),
+     so the shape is set mostly by launches of a similar size to this
+     one (for GTA VI's scale, the biggest launches). It dips to ~0.7x
+     in hours 3-4 (Europe asleep, US not yet unlocked), jumps at hours
      5-6 (US East midnight) and 9 (US West midnight), and peaks in
      the US evening around hour 20-21.
   3. The scale of the rise depends on how much of the audience was
@@ -35,6 +38,19 @@ Model (learned fresh from the case's own comparables at run time):
      scores a touch lower only by letting coverage slip to 0.87.
      Quantiles are the log-normal quantiles
      p * exp(shape_h * G + z_tau * sd_h).
+  5. A small per-hour centre correction (BIAS_DELTA, shrunk by 0.25):
+     the comparable median systematically over-predicts midday
+     (hours 11-15) and under-predicts the morning rise (hours 5-8)
+     and the evening (hours 18-22) on every practice launch, so the
+     average of those errors, measured on the four practice launches,
+     is added back at a quarter strength. Validated leave-one-case-
+     out: the similarity weighting plus this correction score a LOO
+     mean pinball loss of 0.1863 (0.1801 with the knobs fixed at their
+     modal values), against 0.1932 for the unweighted model tuned the
+     same way, improving on all four held-out cases with 90% coverage
+     at 0.88-0.92. The correction is a fixed table fitted offline on
+     public historical data, like SPREAD; nothing is fitted to the
+     case being forecast beyond its own comparables.
 
 No wall clock, no randomness, no network: the output is a pure
 function of the input case, so two runs are byte-identical.
@@ -54,6 +70,28 @@ SPREAD = 0.85
 G_FLOOR = 0.3
 G_CAP = 2.2
 MAX_VIEWERS = 1_000_000_000.0
+# Similarity weight scale for the median shape: a comparable counts
+# exp(-|log h1_i - log h1_case| / WEIGHT_SCALE). 1.0 keeps an effective
+# sample of ~5-8 launches out of 11 (the final case's weights centre on
+# the biggest launches, the closest analogs to GTA VI).
+WEIGHT_SCALE = 1.0
+# Per-hour centre correction, shrunk by BIAS_LAMBDA (see step 5 below).
+BIAS_LAMBDA = 0.25
+# BIAS_DELTA[hour]: mean (true log-ratio - model centre) over the four
+# practice launches, using the similarity-weighted model. Fitted once,
+# offline, on the public SullyGnome practice answers; the program only
+# reads it. The pattern is stable: every leave-one-case-out subset of
+# the practice launches shows the same signs (midday over-prediction
+# around hours 11-15, morning under-prediction at hours 5-8, evening
+# under-prediction at hours 18-22), so it is a systematic shape error
+# of the comparable median, not noise from one launch.
+BIAS_DELTA = {
+    2: -0.064, 3: -0.076, 4: 0.016, 5: 0.140, 6: 0.250, 7: 0.214,
+    8: 0.133, 9: 0.004, 10: -0.134, 11: -0.312, 12: -0.399,
+    13: -0.420, 14: -0.321, 15: -0.227, 16: -0.105, 17: 0.041,
+    18: 0.123, 19: 0.156, 20: 0.126, 21: 0.129, 22: 0.104,
+    23: 0.087, 24: 0.072,
+}
 
 
 def parse_ts(text):
@@ -111,6 +149,19 @@ def median(values):
     if n % 2:
         return ordered[mid]
     return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def weighted_median(pairs):
+    """Median of values with weights: the value where the cumulative
+    weight first reaches half the total."""
+    ordered = sorted(pairs)
+    total = sum(w for _, w in ordered)
+    acc = 0.0
+    for value, weight in ordered:
+        acc += weight
+        if acc >= total / 2.0:
+            return value
+    return ordered[-1][0]
 
 
 def fit_growth(rows):
@@ -171,18 +222,22 @@ def learn(case):
                              max(log_ratio.values()), log_ratio))
     if not rows:
         return None
+    anchor = hour_one_viewers(case)
+    log_anchor = math.log(max(anchor, 1))
+    weights = [math.exp(-abs(math.log(first) - log_anchor) / WEIGHT_SCALE)
+               for _, first, _, _ in rows]
     shape = {}
     for hour in range(1, 25):
-        values = [lr[hour] for _, _, _, lr in rows if hour in lr]
-        if values:
-            shape[hour] = median(values)
+        pairs = [(lr[hour], w) for (_, _, _, lr), w in zip(rows, weights)
+                 if hour in lr]
+        if pairs:
+            shape[hour] = weighted_median(pairs)
     peak_shape = max(shape.values())
     if peak_shape <= 0:
         return None
     shape = {hour: value / peak_shape for hour, value in shape.items()}
     intercept, slope = fit_growth(
         [(name, first, peak) for name, first, peak, _ in rows])
-    anchor = hour_one_viewers(case)
     growth = intercept + slope * math.log(max(anchor, 1))
     growth = max(G_FLOOR, min(G_CAP, growth))
     residuals = {hour: [] for hour in range(2, 25)}
@@ -243,6 +298,7 @@ def forecast(case):
     rows = []
     for hour in range(2, 25):
         centre = shape.get(hour, shape.get(24, 0.0)) * growth
+        centre += BIAS_LAMBDA * BIAS_DELTA.get(hour, 0.0)
         sd = spread.get(hour, 0.5) * SPREAD
         quantiles = []
         for z in Z:
